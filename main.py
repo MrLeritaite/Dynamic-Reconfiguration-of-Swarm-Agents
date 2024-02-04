@@ -5,7 +5,7 @@ import math
 
 class Player:
     def __init__(self, player_width, player_height, player_x, player_y, player_speed):
-        self.rotation_angle = None
+        self.rotation_angle = 0
         self.width = player_width
         self.height = player_height
         self.position_x = player_x
@@ -36,43 +36,32 @@ class Map:
 
 
 class Cone:
-    def __init__(self, cone_length, cone_angle):
+    def __init__(self, cone_length, cone_angle, line_thickness):
         self.length = cone_length
         self.cone_angle = cone_angle
         self.color = (89, 86, 82)
+        self.line_thickness = line_thickness
+        self.first_frame = True
+        self.rotation_angle = 90
 
-    def draw(self, screen, player_x, player_y, player_width, rotation_angle):
-        player_center_x = player_x + player_width // 2
-        player_center_y = player_y + player_height // 2
-
-        if player_dx != 0 or player_dy != 0:
-            rotation_angle = math.degrees(math.atan2(-player_dy, player_dx))
-        else:
+    def draw(self, screen, player_x, player_y, player_width, last_movement):
+        if last_movement != (0, 0):
             rotation_angle = math.degrees(math.atan2(-last_movement[1], last_movement[0]))
+        else:
+            rotation_angle = self.rotation_angle
 
-        cone_front_angle = math.radians(180 - cone_angle + rotation_angle)
-        cone_front_x = player_center_x + cone_length * math.cos(cone_front_angle)
-        cone_front_y = player_center_y - cone_length * math.sin(cone_front_angle)
+        player_center_x = player_x + player_width // 2
+        player_center_y = player_y + player_width // 2
 
-        cone_front_end_angle = math.radians(180 + cone_angle + rotation_angle)
-        cone_front_end_x = player_center_x + cone_length * math.cos(cone_front_end_angle)
-        cone_front_end_y = player_center_y - cone_length * math.sin(cone_front_end_angle)
+        cone_front_x = player_center_x + self.length * math.cos(math.radians(rotation_angle))
+        cone_front_y = player_center_y - self.length * math.sin(math.radians(rotation_angle))
 
-        cone_back_angle = math.radians(0 + cone_angle + rotation_angle)
-        cone_back_x = player_center_x + cone_length * math.cos(cone_back_angle)
-        cone_back_y = player_center_y - cone_length * math.sin(cone_back_angle)
+        cone_back_x = player_center_x + self.length * math.cos(math.radians(180 + rotation_angle))
+        cone_back_y = player_center_y - self.length * math.sin(math.radians(180 + rotation_angle))
 
-        cone_back_end_angle = math.radians(0 - cone_angle + rotation_angle)
-        cone_back_end_x = player_center_x + cone_length * math.cos(cone_back_end_angle)
-        cone_back_end_y = player_center_y - cone_length * math.sin(cone_back_end_angle)
+        pygame.draw.line(screen, self.color, (player_center_x, player_center_y), (cone_front_x, cone_front_y), self.line_thickness)
+        pygame.draw.line(screen, self.color, (player_center_x, player_center_y), (cone_back_x, cone_back_y), self.line_thickness)
 
-        pygame.draw.polygon(screen, self.color, [(player_center_x, player_center_y),
-                                                 (cone_front_x, cone_front_y),
-                                                 (cone_front_end_x, cone_front_end_y)])
-
-        pygame.draw.polygon(screen, self.color, [(player_center_x, player_center_y),
-                                                 (cone_back_x, cone_back_y),
-                                                 (cone_back_end_x, cone_back_end_y)])
 
 
 pygame.init()
@@ -91,12 +80,12 @@ player_x = 960
 player_y = 600
 player_speed = 5
 
-cone_length = 100
+cone_length = 50
 cone_angle = 60
 
 player = Player(player_width, player_height, player_x, player_y, player_speed)
 wall = Map("walls.png")
-cone = Cone(cone_length, cone_angle)
+cone = Cone(cone_length, cone_angle, 1)
 
 score = 0
 
@@ -137,7 +126,7 @@ while running:
 
     screen.fill((0, 0, 0))
     wall.draw(screen)
-    cone.draw(screen, player.position_x, player.position_y, player.width, player.rotation_angle)
+    cone.draw(screen, player.position_x, player.position_y, player.width, last_movement)
     player.draw(screen)
     score_text = font.render(f"Score: {score}", True, (0, 0, 0))
     screen.blit(score_text, (20, 20))
