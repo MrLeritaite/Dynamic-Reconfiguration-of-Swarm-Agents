@@ -1,147 +1,96 @@
+from gym.envs.registration import register
+import gym
+import matplotlib.pyplot as plt
 import pygame
-import sys
-import math
+from agent import DDQNAgent
+import pickle
+import torch
+
+save_interval = 10
+
+plt.figure(figsize=(10, 5))
+NUM_EPISODES = 10000
+SEED = 1234
+
+max_steps_per_episode = 1000
+steps = 0
+
+if __name__ == "__main__":
+    register(
+        id='Test',
+        entry_point='env.env:Environment',
+    )
+    env = gym.make('Test')
+
+    state_size = env.observation_space.shape[0]
+    action_size = 5
+
+    agent = DDQNAgent(state_size, action_size, SEED)
+
+    # Initialize lists to store rewards and observations
+    rewards_per_episode = []
+    observations_per_episode = []
+
+    # Run multiple episodes
+    for episode in range(NUM_EPISODES):
+        observation = env.reset()
+        done = False
+        total_reward = 0
+        episode_observations = []
+
+        while not done:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    done = True
+
+            # Perform a step in the environment
+            action = [agent.act(observation) for _ in range(3)]
+            observation, reward, done, _ = env.step(action)
+
+            # Accumulate rewards
+            total_reward += reward
+            episode_observations.append(observation)
+
+            # Render the environment
+            steps += 1
+
+            # Check if maximum steps reached without solving the environment
+            if steps >= max_steps_per_episode:
+                print("Maximum steps reached without solving the environment. Resetting...")
+                done = True
+                break
 
 
-class Player:
-    def __init__(self, player_width, player_height, player_x, player_y, player_speed):
-        self.rotation_angle = 0
-        self.width = player_width
-        self.height = player_height
-        self.position_x = player_x
-        self.position_y = player_y
-        self.player_speed = player_speed
+            env.render()
 
-    def move(self, dx, dy):
-        self.position_x += dx * self.player_speed
-        self.position_y += dy * self.player_speed
-        self.position_x = max(0, min(self.position_x, 1024 - self.width))
-        self.position_y = max(0, min(self.position_y, 1024 - self.height))
+        steps = 0
 
-    def rotate(self, angle):
-        self.rotation_angle = angle
+        # Store rewards and observations for the episode
+        rewards_per_episode.append(total_reward)
+        observations_per_episode.append(episode_observations)
 
-    def draw(self, screen):
-        rotated_player = pygame.transform.rotate(pygame.Surface((self.width, self.height)),
-                                                 self.rotation_angle)
-        screen.blit(rotated_player, (self.position_x, self.position_y))
+        if (episode + 1) % save_interval == 0:
+            # Save Q-network weights
+            torch.save(agent.qnetwork_local.state_dict(), f'qnetwork_local_{episode + 1}.pth')
+            torch.save(agent.qnetwork_target.state_dict(), f'qnetwork_target_{episode + 1}.pth')
 
+            # Save replay buffer
+            with open(f'replay_buffer_{episode + 1}.pkl', 'wb') as f:
+                pickle.dump(agent.replay_buffer, f)
 
-class Map:
-    def __init__(self, image_path):
-        self.image = pygame.image.load(image_path).convert()
+            print(f"Learning progress saved at episode {episode + 1}")
 
-    def draw(self, screen):
-        screen.blit(self.image, (0, 0))
+            plt.plot(rewards_per_episode, label='Reward')
+            plt.xlabel('Episode')
+            plt.ylabel('Total Reward')
+            plt.title('Training Progress')
+            plt.legend()
+            plt.grid(True)
+            plt.pause(0.05)
+            plt.show()
+            plt.savefig(f"replay_buffer_{episode + 1}.png")
 
+        print(f"Episode {episode + 1}, Total Reward: {total_reward}")
 
-class Cone:
-    def __init__(self, cone_length, cone_angle, line_thickness):
-        self.length = cone_length
-        self.cone_angle = cone_angle
-        self.color = (89, 86, 82)
-        self.line_thickness = line_thickness
-        self.first_frame = True
-        self.rotation_angle = 90
-
-    def draw(self, screen, player_x, player_y, player_width, last_movement):
-        if last_movement != (0, 0):
-            rotation_angle = math.degrees(math.atan2(-last_movement[1], last_movement[0]))
-        else:
-            rotation_angle = self.rotation_angle
-
-        player_center_x = player_x + player_width // 2
-        player_center_y = player_y + player_width // 2
-
-        cone_front_x = player_center_x + self.length * math.cos(math.radians(rotation_angle))
-        cone_front_y = player_center_y - self.length * math.sin(math.radians(rotation_angle))
-
-        cone_back_x = player_center_x + self.length * math.cos(math.radians(180 + rotation_angle))
-        cone_back_y = player_center_y - self.length * math.sin(math.radians(180 + rotation_angle))
-
-        pygame.draw.line(screen, self.color, (player_center_x, player_center_y), (cone_front_x, cone_front_y), self.line_thickness)
-        pygame.draw.line(screen, self.color, (player_center_x, player_center_y), (cone_back_x, cone_back_y), self.line_thickness)
-
-
-
-pygame.init()
-
-screen_width = 1024
-screen_height = 1024
-screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("Wall Boundaries")
-
-wall_image = pygame.image.load("walls.png").convert()
-
-player_width = 30
-player_height = 30
-player_color = (0, 0, 0)
-player_x = 960
-player_y = 600
-player_speed = 5
-
-cone_length = 50
-cone_angle = 60
-
-player = Player(player_width, player_height, player_x, player_y, player_speed)
-wall = Map("walls.png")
-cone = Cone(cone_length, cone_angle, 1)
-
-score = 0
-
-font = pygame.font.SysFont(None, 30)
-
-player_won = False
-running = True
-
-last_movement = (0, 0)
-
-# Game loop
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-
-    keys = pygame.key.get_pressed()
-
-    prev_player_x, prev_player_y = player.position_x, player.position_y
-
-    player_dx = (keys[pygame.K_d] - keys[pygame.K_a])
-    player_dy = (keys[pygame.K_s] - keys[pygame.K_w])
-
-    if player_dx != 0 or player_dy != 0:
-        last_movement = (player_dx, player_dy)
-        player.move(player_dx, player_dy)
-
-    player.rotate(math.degrees(math.atan2(-player_dy, player_dx)))
-
-    for x in range(player.position_x, player.position_x + player.width):
-        for y in range(player.position_y, player.position_y + player.height):
-            if 0 <= x < wall.image.get_width() and 0 <= y < wall.image.get_height():
-                if wall.image.get_at((x, y)) == (0, 0, 0):
-                    player.position_x, player.position_y = prev_player_x, prev_player_y
-                elif wall.image.get_at((x, y)) == (123, 255, 0):
-                    player_won = True
-                    score += 10
-
-    screen.fill((0, 0, 0))
-    wall.draw(screen)
-    cone.draw(screen, player.position_x, player.position_y, player.width, last_movement)
-    player.draw(screen)
-    score_text = font.render(f"Score: {score}", True, (0, 0, 0))
-    screen.blit(score_text, (20, 20))
-
-    if player_won:
-        font = pygame.font.SysFont(None, 48)
-        text = font.render("You won!", True, (0, 0, 0))
-        text_rect = text.get_rect(center=(screen_width // 2, screen_height // 2))
-        screen.blit(text, text_rect)
-        player.position_x = 960
-        player.position_y = 600
-        pygame.event.clear()
-
-    pygame.display.flip()
-    pygame.time.Clock().tick(60)
-
-pygame.quit()
-sys.exit()
+    # Close the environment
+    env.close()
