@@ -70,7 +70,7 @@ class ReplayBuffer:
 class DDQNAgent:
     def __init__(self, state_size, action_size, seed, learning_rate=1e-3, capacity=1000000,
                  discount_factor=0.99, tau=1e-3, update_every=4, batch_size=64,
-                 eps_start=1.0, eps_end=0.1, eps_decay=0.999,
+                 eps_start=0, eps_end=0, eps_decay=0.999,
                  device="cuda" if torch.cuda.is_available() else "cpu"):
         self.state_size = state_size
         self.action_size = action_size
