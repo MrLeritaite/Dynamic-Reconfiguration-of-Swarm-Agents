@@ -4,31 +4,24 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import random
-import gc
 
 
 # Define the network architecture
 class QNetwork(nn.Module):
-    def __init__(self, state_size, action_size, device):
+    def __init__(self, state_size, action_size):
         super(QNetwork, self).__init__()
-        self.device = device
-
-        self.fc1 = nn.Linear(state_size, 64).to(device)
-        self.fc2 = nn.Linear(64, 64).to(device)
-        self.fc3 = nn.Linear(64, action_size).to(device)  # Output layer with 5 units
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.fc1 = nn.Linear(state_size, 64, device=device)
+        self.fc2 = nn.Linear(64, 128, device=device)
+        self.fc3 = nn.Linear(128, action_size, device=device)
 
     def forward(self, x):
+        x = x.view(-1, 300)
+
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         x = self.fc3(x)
-
         return x
-
-    def set_train_mode(self):
-        """
-        Set the network in training mode.
-        """
-        self.train()
 
 
 # Define the replay buffer
@@ -45,21 +38,22 @@ class ReplayBuffer:
         self.index = (self.index + 1) % self.capacity
 
     def sample(self, batch_size):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         batch = np.random.choice(len(self.buffer), batch_size, replace=False)
         states, actions, rewards, next_states, dones = [], [], [], [], []
         for i in batch:
             state, action, reward, next_state, done = self.buffer[i]
-            states.append(state)
+            states.append(state['maze'])
             actions.append(action)
             rewards.append(reward)
-            next_states.append(next_state)
+            next_states.append(next_state['maze'])
             dones.append(done)
         return (
-            torch.tensor(np.array(states)).float(),
-            torch.tensor(np.array(actions)).long(),
-            torch.tensor(np.array(rewards)).unsqueeze(1).float(),
-            torch.tensor(np.array(next_states)).float(),
-            torch.tensor(np.array(dones)).unsqueeze(1).int()
+            torch.tensor(np.array(states), device=device).float(),
+            torch.tensor(np.array(actions), device=device).long(),
+            torch.tensor(np.array(rewards), device=device).unsqueeze(1).float(),
+            torch.tensor(np.array(next_states), device=device).float(),
+            torch.tensor(np.array(dones), device=device).unsqueeze(1).int()
         )
 
     def __len__(self):
@@ -69,9 +63,7 @@ class ReplayBuffer:
 # Define the Double DQN agent
 class DDQNAgent:
     def __init__(self, state_size, action_size, seed, learning_rate=1e-3, capacity=1000000,
-                 discount_factor=0.99, tau=1e-3, update_every=4, batch_size=64,
-                 eps_start=0, eps_end=0, eps_decay=0.999,
-                 device="cuda" if torch.cuda.is_available() else "cpu"):
+                 discount_factor=0.99, tau=1e-3, update_every=1, batch_size=64, eps=1):
         self.state_size = state_size
         self.action_size = action_size
         self.seed = seed
@@ -80,14 +72,13 @@ class DDQNAgent:
         self.tau = tau
         self.update_every = update_every
         self.batch_size = batch_size
-        self.device = device
-        self.epsilon = eps_start
-        self.eps_end = eps_end
-        self.eps_decay = eps_decay
         self.steps = 0
+        self.eps = eps
+        self.eps_end = 0.1
+        self.eps_decay = 0.999
 
-        self.qnetwork_local = QNetwork(state_size, action_size, device).to(device)
-        self.qnetwork_target = QNetwork(state_size, action_size, device).to(device)
+        self.qnetwork_local = QNetwork(state_size, action_size)
+        self.qnetwork_target = QNetwork(state_size, action_size)
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=learning_rate)
         self.replay_buffer = ReplayBuffer(capacity)
         self.update_target_network()
@@ -97,31 +88,25 @@ class DDQNAgent:
         self.replay_buffer.push(state, action, reward, next_state, done)
 
         # Learn every update_every steps
-        if len(self.replay_buffer) > self.batch_size and self.steps % self.update_every == 0:
-            experiences = self.replay_buffer.sample(self.batch_size)
-            self.learn(experiences)
-
         self.steps += 1
-
-    def epsilon_greedy(self, state):
-        if random.random() > self.epsilon:
-            with torch.no_grad():
-                state = torch.tensor(state, dtype=torch.float).unsqueeze(0).to(self.device)
-                self.qnetwork_local.eval()
-                action_values = self.qnetwork_local(state)
-                self.qnetwork_local.train()
-                return np.argmax(action_values.cpu().data.numpy())
-        else:
-            return random.choice(np.arange(self.action_size))
+        if self.steps % self.update_every == 0:
+            if len(self.replay_buffer) > self.batch_size:
+                experiences = self.replay_buffer.sample(self.batch_size)
+                self.learn(experiences)
 
     def act(self, state):
-        action = self.epsilon_greedy(state)
-        # Decay epsilon
-        self.epsilon = max(self.eps_end, self.epsilon * self.eps_decay)
-        gc.collect()
-        torch.cuda.empty_cache()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        state = torch.from_numpy(state['maze']).float().unsqueeze(0).to(device)
+        self.qnetwork_local.eval()
+        with torch.no_grad():
+            action_values = self.qnetwork_local(state)
+        self.qnetwork_local.train()
 
-        return action
+        if random.random() > self.eps:
+            return np.argmax(action_values.cpu().data.numpy())
+        else:
+            self.eps = max(self.eps_end, self.eps * self.eps * self.eps_decay)
+            return random.choice(np.arange(self.action_size))
 
     def learn(self, experiences):
         states, actions, rewards, next_states, dones = experiences
